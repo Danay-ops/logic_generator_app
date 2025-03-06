@@ -1,0 +1,5 @@
+def set_status_{{ unit_name }}({{status_sheme.keys() | list | first }}='Повторная попытка', {{result_scheme.keys() | list | first }}='Сброс'):
+    nn.env({
+                '{{status_sheme.keys() | list | first }}': {{status_sheme.keys() | list | first }},
+                '{{result_scheme.keys() | list | first }}': {{result_scheme.keys() | list | first }}
+            })
