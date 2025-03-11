@@ -1,0 +1,11 @@
+@check_call_state(nv)
+def {{ unit_name }}_logic(r):
+    nn.env('income_unit', '{{ unit_name }}')
+
+    nn.counter('{{ unit_name }}_logic', '+')
+
+    if nn.counter('{{ unit_name }}_logic') > 30:
+        nn.log('Recursion {{ unit_name }}')
+        return nv.hangup()
+    
+    {{ generated_code }}

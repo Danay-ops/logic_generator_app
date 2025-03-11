@@ -1,0 +1,574 @@
+import re
+import datetime
+import json
+import traceback
+import math
+import inspect
+import requests
+import calendar
+global DAY
+global TIME
+
+
+{{entities_lists}}
+
+DAY = datetime.datetime.today() + datetime.timedelta(hours=3)
+TIME = DAY.strftime('%H:%M')
+
+
+if __name__ == '__main__':
+    import libneuro
+
+    nn = libneuro.NeuroNetLibrary()
+    nlu = libneuro.NeuroNluLibrary()
+    nv = libneuro.NeuroVoiceLibrary()
+    InvalidCallStateError = libneuro.InvalidCallStateError
+    check_call_state = libneuro.check_call_state
+
+
+
+
+def main():
+    nn.env({
+        'recall': 'true'
+    })
+    if not nn.env('attempt'):
+        nn.env('attempt', 1)
+
+    if nn.get_recall_count() != None:
+        nn.env('recall_count', int(nn.get_recall_count()) + 1)
+    else:
+        nn.env('recall_count', 3)
+
+    try:
+        sip_settings = json.loads(nn.storage('sip_settings'))
+        nn.log('sip', sip_settings)
+        if sip_settings:
+            if sip_settings['telephony_type'] == 'EXT':
+                caller_id = sip_settings['config']['caller_id']
+                trunk_uuid = sip_settings['uuid']
+                modified_custom_headers = {(key if key.startswith('X-') else 'X-' + key): value for key, value in
+                                        sip_settings['config']['custom_headers'].items()}
+                if caller_id != '':
+                    proto_additional = {
+                                        "caller_id": caller_id,
+                                        "Remote-Party-ID": f"<tel:{caller_id}>;party=calling;screen=yes;privacy=off",
+                                        "X-Trunk-UUID": trunk_uuid,
+                                    } | modified_custom_headers
+                else:
+                    proto_additional = {"Remote-Party-ID": "party=calling;screen=yes;privacy=off",
+                                        "X-Trunk-UUID": trunk_uuid,
+                                        } | modified_custom_headers
+            else:
+                caller_id = sip_settings['phone_number']
+                trunk_uuid = sip_settings['uuid']
+                nn.log('caller_id', caller_id)
+                if caller_id != '':
+                    proto_additional = {
+                        "caller_id": caller_id,
+                        "Remote-Party-ID": f"<tel:{caller_id}>;party=calling;screen=yes;privacy=off",
+                        "X-Trunk-UUID": trunk_uuid,
+                    }
+                else:
+                    proto_additional = {"Remote-Party-ID": "party=calling;screen=yes;privacy=off",
+                                        "X-Trunk-UUID": trunk_uuid,
+                                        }
+            nn.call(nn.dialog['msisdn'],
+                    entry_point='main_online_container',
+                    on_success_call='after_call_success',
+                    on_failed_call='after_call_fail',
+                    proto_additional=proto_additional)
+    except:
+        proto_additional = {
+            "caller_id": "79014983699",
+            "Remote-Party-ID": f"<tel:79014983699>;party=calling;screen=yes;privacy=off",
+            "X-Trunk-UUID": "7ea3f186-9115-4334-bcd9-c71403d85a7f",
+        }
+        nn.call(nn.dialog['msisdn'],
+                entry_point='main_online_container',
+                on_success_call='after_call_success',
+                on_failed_call='after_call_fail',
+                proto_additional=proto_additional)
+        
+
+
+
+
+
+
+
+
+def main_online_container():
+    
+    try:
+        tts_map = {
+            'Victoria': 'alvina@yandex',
+            'Anna': 'jane@yandex',
+            'Sergey': 'kirill@yandex',
+            'Ivan': 'alexander@yandex',
+            'alena': 'alena@yandex',
+            'ermil': 'ermil@yandex',
+            'filipp': 'filipp@yandex',
+            'jane': 'jane@yandex',
+            'madirus': 'madirus@yandex',
+            'omazh': 'omazh@yandex',
+            'zahar': 'zahar@yandex',
+        }
+        flag = nn.env('flag')
+
+        # Установка параметра TTS, если флаг найден в словаре
+        if flag in tts_map:
+            nv.media_params('tts', tts_map[flag])
+        now = datetime.datetime.now().replace(microsecond=0)
+
+        nn.log('Звонок начался')
+        main_online()
+    except InvalidCallStateError:
+        nn.log('Звонок прерван')
+    except Exception as e:
+        nn.log(e)
+    finally:
+        call_uuid = nn.env('call_uuid')
+        nn.env('call_record',
+            f'https://panel-v2.smartdialogs.ru/downloads?'
+            f'call_uuid={call_uuid}')
+        nn.env('duration', nv.get_call_duration())
+        nn.env('call_transcript', nv.get_call_transcription(return_format=nv.TRANSCRIPTION_FORMAT_TXT))
+
+def main_online():
+    nn.log('Заходим в main_online, начало всей логики')
+    nn.env('bank_address', nn.env('address'))
+    nv.background('office')
+    return check_voicemail_main()
+
+@check_call_state(nv)
+def check_voicemail_main():
+    nv.set_default('listen', {'no_input_timeout': 2700,
+                                'recognition_timeout': 6000,
+                                'speech_complete_timeout': 700,
+                                'asr_complete_timeout': 700,
+                                'interruption_no_input_timeout': 50
+                                }
+                    )
+    with nv.listen((None, None, 10, 'AND'), entities=voicemail_unit_entities_list) as r:
+        pass
+    return check_voicemail_unit_logic(r)
+
+
+##############speaker
+
+def test_interruption(*prompts):
+    if any('main' in x for x in prompts):
+        return True
+    return False
+
+def speak_prompts_test(*prompts,spch_time=1100):
+    nn.log('speak_prompts_test')
+    nv.set_default('listen', {'no_input_timeout': 4000,
+                            'recognition_timeout': 90000,
+                            'speech_complete_timeout': spch_time,
+                            'asr_complete_timeout': 1100,
+                            }
+                )
+    for prompt in prompts:
+        if prompt == 'interruption':
+            nn.counter('interruption', '+')
+            if nn.counter('interruption') <= 5:
+                nv.say('say_after_interrupt', str(nn.counter('interruption')))
+            else:
+                nn.counter('interruption', 1)
+
+        elif prompt == 'NAME':
+            nv.synthesize(f"{nn.env('NAME')}")
+        elif prompt == 'vacancy':
+            nv.synthesize(f"{nn.env('vacancy')}")
+
+        else:           
+            nv.say(prompt)
+
+
+
+
+{{final_script}}
+
+
+
+def hangup_unit_speaker(*prompts):
+    nn.log('hangup_unit')
+    for prompt in prompts:
+        nv.say(prompt)
+
+    return nv.hangup()
+
+
+
+
+def callback_create(call_time=nn.get_recall_delay()):
+    if int(nn.env('attempt')) >= int(nn.env('recall_count')):
+        nn.log(f'Так как попытка > {nn.env("attempt")} - перезвон не создаём')
+        return
+    if 'None' in str(call_time):
+        nn.log('None в call_time')
+        call_time = '02:00'   # поставил перезвон на 2 часа, если не передают время перезвона
+    if nn.env('said_time') and nn.env('said_time') != 'error' and nn.env('said_time') is not None:
+        call_time = nn.env('said_time')
+    env_log(f'Создаем Callback через {call_time}')
+
+    try:
+        sip_settings = json.loads(nn.storage('sip_settings'))
+        nn.log('sip', sip_settings)
+        if sip_settings:
+            if sip_settings['telephony_type'] == 'EXT':
+                caller_id = sip_settings['config']['caller_id']
+                trunk_uuid = sip_settings['uuid']
+                modified_custom_headers = {(key if key.startswith('X-') else 'X-' + key): value for key, value in
+                                        sip_settings['config']['custom_headers'].items()}
+                if caller_id != '':
+                    proto_additional = {
+                                        "caller_id": caller_id,
+                                        "Remote-Party-ID": f"<tel:{caller_id}>;party=calling;screen=yes;privacy=off",
+                                        "X-Trunk-UUID": trunk_uuid,
+                                    } | modified_custom_headers
+                else:
+                    proto_additional = {"Remote-Party-ID": "party=calling;screen=yes;privacy=off",
+                                        "X-Trunk-UUID": trunk_uuid,
+                                        } | modified_custom_headers
+            else:
+                caller_id = sip_settings['phone_number']
+                trunk_uuid = sip_settings['uuid']
+                nn.log('caller_id', caller_id)
+                if caller_id != '':
+                    proto_additional = {
+                        "caller_id": caller_id,
+                        "Remote-Party-ID": f"<tel:{caller_id}>;party=calling;screen=yes;privacy=off",
+                        "X-Trunk-UUID": trunk_uuid,
+                    }
+                else:
+                    proto_additional = {"Remote-Party-ID": "party=calling;screen=yes;privacy=off",
+                                        "X-Trunk-UUID": trunk_uuid,
+                                        }
+            nn.call(nn.dialog['msisdn'],
+                    call_time,
+                    entry_point='main_online_container',
+                    on_success_call='after_call_success',
+                    on_failed_call='after_call_fail',
+                    before_call='before_call_unit',
+                    proto_additional=proto_additional)
+    except:
+        proto_additional = {
+            "caller_id": "79014983699",
+            "Remote-Party-ID": f"<tel:79014983699>;party=calling;screen=yes;privacy=off",
+            "X-Trunk-UUID": "7ea3f186-9115-4334-bcd9-c71403d85a7f",
+        }
+        nn.call(nn.dialog['msisdn'],
+                call_time,
+                entry_point='main_online_container',
+                on_success_call='after_call_success',
+                on_failed_call='after_call_fail',
+                before_call='before_call_unit',
+                proto_additional=proto_additional)
+    nn.env('recall', 'false')
+
+#########################before_call
+
+def before_call_unit():
+    nn.log("before_call_unit")
+    env_log(('call_datetime', ''),
+            ('duration', ''),
+            ('attempt', int(nn.env('attempt')) + 1),
+            ('status_scheme', 'Повторная попытка'),
+            ('result_scheme', 'Недозвон'),
+            ('call_time', ''),
+            ('income_unit', ''),
+            ('call_record', ''),
+            ('call_transcript', ''),
+            ('call_log', ''),
+            ('logic_stage', 'before_call'))
+    if int(nn.env('attempt')) <= int(nn.env('recall_count')):
+        nn.env('need_call', True)
+        nn.env('logic_stage', '')
+    else:
+        nn.env('need_call', False)
+        nn.env(('status_scheme', 'Завершен'))
+
+
+################################################## after_call_fail
+
+
+
+def after_call_success():
+    nn.log('after_call_success')
+    callback_time = nn.get_recall_delay()
+    call_uuid = nn.env("uuid")
+
+    nn.log('attempt in after_call_success', nn.env('attempt'))
+
+    nn.env({"status_dial": nn.env("call_status"),
+            "uuid": nn.env("call_uuid"),
+            "call_record": (f"https://panel-v2.smartdialogs.ru/downloads?"
+                            f"call_uuid={call_uuid}")})
+
+    if int(nn.env('attempt')) < int(nn.env('recall_count')) and nn.env('status_scheme') != 'Завершен':
+        if nn.env('recall') == 'true':
+            nn.log('Создал перезвон')
+            log_info(last_attempt='false')
+            callback_create(callback_time)
+            nn.dump()
+        else:
+            nn.log('Перезвон не требуется')
+            log_info(last_attempt='true')
+            nn.dump()
+            nn.dialog.result = nn.RESULT_DONE
+    else:
+        nn.env('status_scheme', 'Завершен')
+        nn.log('Попыток больше нет')
+        log_info(last_attempt='true')
+        nn.dump()
+        nn.dialog.result = nn.RESULT_DONE
+
+def after_call_fail():
+    nn.log('after_call_fail')
+    call_start = datetime.datetime.now().replace(microsecond=0)
+    
+    nn.log('attempt in after_call_fail', nn.env('attempt'))
+
+    nn.env({"start_time": str(call_start),
+            "duration": 0,
+            "call_transcript": "",
+            "status_dial": nn.env("call_status"),
+            "call_log": (
+                f"https://cms-v3.neuro.net/logs?msisdn={nn.env('msisdn')}"
+                f"&call_uuid={nn.env('call_uuid')}&log_type=main&lng=en&"
+                f"agent_uuid={nn.env('agent_uuid')}"
+            )
+            })
+
+    if int(nn.env('attempt')) < int(nn.env('recall_count')):
+        nn.log('Создал перезвон')
+        log_info(last_attempt='false')
+        callback_create(nn.get_recall_delay())
+        nn.dump() 
+    else:
+        nn.env('status_scheme', 'Завершен')
+        nn.log('Попыток больше нет')
+        log_info(last_attempt='true')
+        nn.dump()
+        nn.dialog.result = nn.RESULT_DONE
+
+
+# ###################### Для платформы
+
+
+def get_bulk_uuid():
+    if nn.env('call_direction') == 'inbound':
+        return '900b6f7d-eec9-44c2-8b2d-a22fb502c945'   # Дефлотный UUID
+    nn.log("func", inspect.stack()[0][3])
+    dialog_obj = nn.dialog._DialogAttributes__nlu_dialog
+    if hasattr(dialog_obj, "dialog_entity"):
+        dialog_entity = dialog_obj.dialog_entity
+        bulk_uuid = dialog_entity.bulk_uuid
+        if bulk_uuid:
+            nn.log("bulk_uuid", str(bulk_uuid))
+            return str(bulk_uuid)
+    return ''
+
+def call_transcript_with_null():
+    nn.env('call_transcript', nv.get_call_transcription(return_format=nv.TRANSCRIPTION_FORMAT_TXT))
+
+    nn.counter('call_transcript', '+')
+    nn.env('call_transcript_counter', nn.counter('call_transcript'))
+    if nn.counter('call_transcript') <= 1:
+        if not nn.env('call_transcript'):
+            nn.env('call_transcript_clone', 'human: no message; ')
+        else:
+            nn.env('call_transcript_clone', nn.env('call_transcript') + '; human: no message')
+
+    if len(nn.env('call_transcript')) != len(nn.env('call_transcript_clone')):
+        slice_transcript = nn.env('call_transcript')[len(nn.env('call_transcript_clone')):]
+
+        nn.counter('slice_counter', '+')
+        if nn.counter('slice_counter') == 1:
+            nn.env('call_transcript_with_null', nn.env('call_transcript_clone') + slice_transcript)
+        else:
+            nn.env('call_transcript_with_null', nn.env('call_transcript_with_null') + slice_transcript + '; human: no message')
+
+        nn.env('call_transcript_clone', nn.env('call_transcript'))
+
+
+exception_extra_fields = [
+        "flag",
+        "dialog_start_time",
+        "dialog_uuid",
+        "agent_uuid",
+        "call_start_time",
+        "call_uuid",
+        "lang",
+        'promotion is interesting',
+        'msisdn',
+        'trunk',
+        'attempt',
+        "call_record",
+        "call_status",
+        "ringing_duration",
+        "start_time",
+        "logic_stage",
+        "result_scheme",
+        "recall_count",
+        "recall",
+        "income_unit",
+        "after_recall",
+        "duration",
+        "call_transcript",
+        "status_dial",
+        "call_time",
+        "income_unit",
+        "uuid",
+        "question",
+        "call_log",
+        "need_call",
+        "call_datetime",
+        "status_scheme",
+        "status_send_logs",
+        "unit",
+]
+
+
+def log_info(last_attempt):
+    try:
+        call_uuid = nn.env('call_uuid')
+        if call_uuid and call_uuid != "None":
+            nn.env('call_record', f'https://panel-v2.smartdialogs.ru/downloads?call_uuid={call_uuid}')
+        else:
+            nn.env('call_record', '')
+        nn.log('get_data')
+        if nn.env('call_transcript_counter') == 1 and nn.env('call_transcript_with_null') == 'human: no message; ':
+            nn.env('call_transcript_with_null', nn.env('call_transcript_with_null') + nn.env('call_transcript'))
+        if not nn.env('call_transcript_with_null'):
+            call_transcript = nn.env('call_transcript')
+        else:
+            call_transcript = nn.env('call_transcript_with_null')
+        if nn.env('result_scheme') == 'Автоответчик':
+            voicemail_detection = 'true'
+        else:
+            voicemail_detection = 'false'
+        call_record = nn.env('call_record')
+        if call_transcript == '':
+            call_transcript = ''
+        if call_record == '':
+            call_record = ''
+        if not nn.env('attempt'):
+            attempt = ''
+        else:
+            attempt = int(nn.env('attempt'))
+        if nn.env('status_scheme'):
+            status_scheme = nn.env('status_scheme')
+        else:
+            status_scheme = ''
+        if nn.env('result_scheme'):
+            result_scheme = nn.env('result_scheme')
+        else:
+            result_scheme = ''
+        if nn.dialog['msisdn'][0] == '9':
+            number_phone = '7' + nn.dialog['msisdn']
+        else:
+            number_phone = nn.dialog['msisdn']
+        if nn.env('call_start'):
+            time = nn.env('call_start')
+        else:
+            time = str(datetime.datetime.now().replace(microsecond=0))
+        all_env = nn.env()  # Для extra_field, исключаем лишние поля
+        extra_field = {name: value for name, value in all_env.items() if name not in exception_extra_fields}
+        payload = json.dumps({
+            'call_uuid': nn.env('call_uuid'),
+            'dialog_uuid': nn.env('dialog_uuid'),
+            'msisdn': number_phone,
+            'agent_id': nn.env('agent_uuid'),
+            'call_start_time': time,
+            'call_status': nn.env('call_status'),
+            'last_attempt': last_attempt,
+            'voicemail_detection': voicemail_detection,
+            'queue_uuid': get_bulk_uuid(),
+            'call_record': call_record,
+            'call_direction': 'outbound',
+            'call_duration': nn.env('duration'),
+            'call_transcription': call_transcript,
+            'asr_duration': '0',
+            'tts_duration': '0',
+            'call_result': result_scheme,
+            'char_field_1': status_scheme,
+            'int_field_3': attempt,
+            'extra_fields': extra_field  # Тут
+        })
+        url = "https://test.smartdialogs.net/api/dump/"
+        nn.log('payload', payload)
+        headers = {
+                    'Content-Type': 'application/json',
+                    'Authorization': nn.storage('token')
+        }
+        response = requests.request("POST", url, headers=headers, data=payload, timeout=15)
+        nn.log('status_code', response.status_code)
+        nn.log('content', response.text)
+        nn.env('status_send_logs', response.status_code)
+        if response.status_code not in (201, 200, 400):
+            send_tg(f'Запрос в rd не дошёл {response.status_code}')     # ,additional=True было в передаваемых парам
+        if response.status_code == 400:
+            send_tg(f'Запрос в rd не дошёл {response.status_code}')
+    except Exception as e:
+        try:
+            response = requests.request("POST", url, headers=headers, data=payload, timeout=15)
+            nn.log('status_code', response.status_code)
+            nn.log('content', response.text)
+            nn.env('status_send_logs', response.status_code)
+            if response.status_code not in (201, 200, 400):
+                send_tg(f'Запрос в rd не дошёл {response.status_code}') # ,additional=True было в передаваемых парам
+            if response.status_code == 400:
+                send_tg(f'Запрос в rd не дошёл {response.status_code}')
+        except Exception as e:
+            nn.log(traceback.format_exc())
+            send_tg(e)      # ,additional=True было в передаваемых парам
+            nn.log('API_request', 'error')
+    return
+
+{% if utterance_date %}
+{{ utterance_date }}
+{% endif %}
+
+{% if utterance_time %}
+{{ utterance_time }}
+{% endif %}
+
+# ################# Доп функции
+
+def env_log(*args):
+    """функция записи в env и логгирования переменных и статусов"""
+    try:
+        log_list = []
+        for arg in args:
+            if isinstance(arg, tuple):
+                nn.env(f'{arg[0]}', f'{arg[1]}')
+                log_list.append(f'{(arg[0])}={nn.env((arg[0]))}')
+            elif isinstance(arg, str):
+                log_list.append(f'condition = {arg}')
+            else:
+                nn.log('Неверный формат логгируемых данных')
+        if not log_list:
+            nn.log('log_list пуст!')
+        else:
+            nn.log(f'{log_list}')
+    except Exception:
+        nn.log('функция env_log() не отработала')
+    return
+
+
+def send_tg(error_type):
+    chat_id = ['291453773']
+    for dev in chat_id:
+        chat_id = dev
+        number = nn.env('msisdn')
+        call_uuid = nn.env('call_uuid')
+        error = f'В агенте "Finance_Information" возникла ошибка:\n{error_type},\ncall_uuid звонка:{call_uuid},\nНОМЕР: {number}'
+        url = f"https://api.telegram.org/bot5709112061:AAFGJ2L5pP3UFn9bCEHlxxVk2DEoGwDrcJ0/sendMessage?chat_id={chat_id}&text={error}"
+        payload = {}
+        headers = {}
+        response = requests.request("GET", url, headers=headers, data=payload)
+    return

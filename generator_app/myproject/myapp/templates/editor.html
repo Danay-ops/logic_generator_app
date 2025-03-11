@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jinja2 + Monaco Editor</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.38.0/min/vs/loader.min.js"></script>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+        }
+
+        #editor {
+            flex-grow: 1;
+            border: 1px solid #ccc;
+        }
+    </style>
+</head>
+<body>
+    <h2>Загрузите Excel-файл</h2>
+    
+    <form id="upload-form" enctype="multipart/form-data">
+        {% csrf_token %}  <!-- CSRF-токен для защиты Django -->
+        <input type="file" name="file" id="file-input" accept=".xlsx, .xls">
+        <button type="button" onclick="uploadFile()">Загрузить</button>
+        <button type="button" id="toggle-template-btn" onclick="toggleTemplate()">Добавить парсинг даты</button>
+        <button type="button" id="toggle-template_time-btn" onclick="toggleTemplate_time()">Добавить парсинг времени</button>
+
+    </form>
+
+    <h2>Результат</h2>
+    <div id="editor"></div>
+
+    <script>
+        var editor;
+        var includeDateParsing = false;  // По умолчанию шаблон парсинга даты не включен
+        var includeTimeParsing = false; // По умолчанию шаблон парсинга времени не включен
+
+        require.config({ paths: { 'vs': 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.38.0/min/vs' }});
+        require(["vs/editor/editor.main"], function () {
+            editor = monaco.editor.create(document.getElementById("editor"), {
+                value: "",
+                language: "python",  // Включаем Python для подсветки синтаксиса
+                theme: "vs-dark"
+            });
+    
+            adjustEditorSize();
+            window.addEventListener("resize", adjustEditorSize);
+        });
+    
+        function adjustEditorSize() {
+            let editorDiv = document.getElementById("editor");
+            let windowHeight = window.innerHeight;
+            let editorTop = editorDiv.getBoundingClientRect().top;
+            let availableHeight = windowHeight - editorTop - 20;
+    
+            editorDiv.style.height = availableHeight + "px";
+            editor.layout();
+        }
+
+        function toggleTemplate() {
+            includeDateParsing = !includeDateParsing;  // Переключаем флаг
+            let button = document.getElementById("toggle-template-btn");
+            button.textContent = includeDateParsing ? "Убрать парсинг даты" : "Добавить парсинг даты";
+        }
+
+        function toggleTemplate_time() {
+            includeTimeParsing = !includeTimeParsing;  // Переключаем флаг
+            let button = document.getElementById("toggle-template_time-btn");
+            button.textContent = includeTimeParsing ? "Убрать парсинг времени" : "Добавить парсинг времени";
+        }
+    
+        function getCSRFToken() {
+            return document.querySelector('[name=csrfmiddlewaretoken]').value;
+        }
+    
+        function uploadFile() {
+            let formData = new FormData();
+            formData.append("file", document.getElementById("file-input").files[0]);
+            formData.append("include_date_parsing", includeDateParsing);  // Передаем флаг на сервер
+            formData.append("include_time_parsing", includeTimeParsing);
+
+
+            fetch("/process/", {
+                method: "POST",
+                headers: { "X-CSRFToken": getCSRFToken() },
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.output) {
+                    editor.setValue(data.output);
+                    
+                    console.log("Ошибки:", data.errors);  // Проверяем ошибки в консоли
+
+                    // Если есть ошибки - подсвечиваем их
+                    if (data.errors && data.errors.length > 0) {
+                        let markers = data.errors.map(error => ({
+                            message: error.message,
+                            severity: monaco.MarkerSeverity.Error,
+                            startLineNumber: error.lineNumber,
+                            startColumn: error.column,
+                            endLineNumber: error.lineNumber,
+                            endColumn: error.column + 1  // Исправляем выделение ошибки
+                        }));
+
+                        monaco.editor.setModelMarkers(editor.getModel(), "python", markers);
+                    } else {
+                        monaco.editor.setModelMarkers(editor.getModel(), "python", []);
+                    }
+                } else {
+                    editor.setValue("Ошибка обработки файла");
+                }
+            })
+            .catch(error => {
+                editor.setValue("Ошибка: " + error);
+            });
+        }
+    </script>
+</body>
+</html>
